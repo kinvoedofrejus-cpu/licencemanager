@@ -23,10 +23,11 @@ function genLicenseKey(code) {
   return `${code}-${seg()}-${seg()}-${seg()}`;
 }
 
-function addDuration(dateIso, type) {
+function addDuration(dateIso, type, durationDays) {
   const d = new Date(dateIso);
   if (type === "mensuel") d.setMonth(d.getMonth() + 1);
   else if (type === "annuel") d.setFullYear(d.getFullYear() + 1);
+  else if (type === "jours") d.setTime(d.getTime() + (Number(durationDays) || 0) * 86400000);
   else return null; // vie
   return d.toISOString();
 }
@@ -158,7 +159,7 @@ async function handleAdmin(request, env, path, method) {
     }
 
     if (method === "POST" && !id) {
-      const { software_id, client_name, client_email, type, max_devices, price } = await request.json();
+      const { software_id, client_name, client_email, type, max_devices, price, duration_days } = await request.json();
       const sw = await env.DB.prepare("SELECT * FROM software WHERE id = ?").bind(software_id).first();
       if (!sw) return json({ error: "Logiciel introuvable" }, 404);
 
@@ -178,12 +179,12 @@ async function handleAdmin(request, env, path, method) {
       const now = new Date().toISOString();
       const newId = uid();
       const key = genLicenseKey(sw.code);
-      const expiration = addDuration(now, type);
+      const expiration = addDuration(now, type, duration_days);
 
       await env.DB.prepare(`INSERT INTO licenses
-        (id, software_id, client_id, license_key, type, price, max_devices, status, expiration, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`)
-        .bind(newId, software_id, clientId, key, type, price || 0, max_devices || 1, "active", expiration, now)
+        (id, software_id, client_id, license_key, type, price, max_devices, status, expiration, created_at, duration_days)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+        .bind(newId, software_id, clientId, key, type, price || 0, max_devices || 1, "active", expiration, now, duration_days || null)
         .run();
 
       return json({ id: newId, key, expiration }, 201);
@@ -193,7 +194,7 @@ async function handleAdmin(request, env, path, method) {
       const lic = await env.DB.prepare("SELECT * FROM licenses WHERE id = ?").bind(id).first();
       if (!lic) return json({ error: "Licence introuvable" }, 404);
       const base = lic.expiration && new Date(lic.expiration) > new Date() ? lic.expiration : new Date().toISOString();
-      const expiration = addDuration(base, lic.type);
+      const expiration = addDuration(base, lic.type, lic.duration_days);
       await env.DB.prepare("UPDATE licenses SET status = 'active', expiration = ? WHERE id = ?").bind(expiration, id).run();
       return json({ expiration });
     }
